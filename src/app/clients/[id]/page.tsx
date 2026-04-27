@@ -3,17 +3,12 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Save, MapPin, Building, User, Tag, Star } from 'lucide-react'
+import {
+  ArrowLeft, Save, MapPin, Building, User, Tag, Star,
+  Mail, MessageSquare, Clock, CheckCircle, Loader2, Zap,
+} from 'lucide-react'
 
-const STATUS_OPTIONS = ['New', 'Contacted', 'Meeting', 'Negotiating', 'Closed']
-
-const STATUS_STYLES: Record<string, string> = {
-  New: 'bg-blue-500/15 text-blue-400 ring-1 ring-blue-500/30',
-  Contacted: 'bg-yellow-500/15 text-yellow-400 ring-1 ring-yellow-500/30',
-  Meeting: 'bg-purple-500/15 text-purple-400 ring-1 ring-purple-500/30',
-  Negotiating: 'bg-orange-500/15 text-orange-400 ring-1 ring-orange-500/30',
-  Closed: 'bg-green-500/15 text-green-400 ring-1 ring-green-500/30',
-}
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Lead {
   id: string
@@ -30,20 +25,112 @@ interface Lead {
   created_at?: string
 }
 
+interface SequenceStep {
+  id: string
+  step: number
+  day: number
+  channel: 'email' | 'sms'
+  subject: string | null
+  body: string
+  status: string
+  scheduled_at: string
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const STATUS_OPTIONS = ['New', 'Contacted', 'Meeting', 'Negotiating', 'Closed']
+
+const STATUS_STYLES: Record<string, string> = {
+  New:          'bg-blue-500/15 text-blue-400 ring-1 ring-blue-500/30',
+  Contacted:    'bg-yellow-500/15 text-yellow-400 ring-1 ring-yellow-500/30',
+  Meeting:      'bg-purple-500/15 text-purple-400 ring-1 ring-purple-500/30',
+  Negotiating:  'bg-orange-500/15 text-orange-400 ring-1 ring-orange-500/30',
+  Closed:       'bg-green-500/15 text-green-400 ring-1 ring-green-500/30',
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function SequenceCard({ seq }: { seq: SequenceStep }) {
+  const [expanded, setExpanded] = useState(seq.step === 1)
+
+  const scheduledDate = new Date(seq.scheduled_at).toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric',
+  })
+
+  const isEmail = seq.channel === 'email'
+
+  return (
+    <div className="border border-gray-800 rounded-lg overflow-hidden">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center gap-3 px-4 py-3 bg-gray-800/40 hover:bg-gray-800/70 transition-colors text-left"
+      >
+        {/* Step badge */}
+        <span className="w-6 h-6 rounded-full bg-blue-600/20 text-blue-400 text-xs font-bold flex items-center justify-center shrink-0">
+          {seq.step}
+        </span>
+
+        {/* Channel icon */}
+        {isEmail
+          ? <Mail size={13} className="text-blue-400 shrink-0" />
+          : <MessageSquare size={13} className="text-green-400 shrink-0" />}
+
+        {/* Label */}
+        <span className="text-sm text-white flex-1 truncate font-medium">
+          {isEmail ? (seq.subject ?? 'Email') : `SMS — Day ${seq.step === 1 ? 0 : [2,5,10,21][seq.step - 2] ?? seq.step}`}
+        </span>
+
+        {/* Date */}
+        <span className="flex items-center gap-1 text-xs text-gray-500 shrink-0">
+          <Clock size={11} />
+          {scheduledDate}
+        </span>
+
+        {/* Expand toggle */}
+        <span className="text-gray-600 text-xs">{expanded ? '▲' : '▼'}</span>
+      </button>
+
+      {expanded && (
+        <div className="px-4 py-3 bg-gray-900/40 border-t border-gray-800">
+          {isEmail && seq.subject && (
+            <p className="text-xs text-gray-500 mb-1">
+              Subject: <span className="text-gray-300">{seq.subject}</span>
+            </p>
+          )}
+          <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{seq.body}</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+
 export default function ClientProfilePage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
 
+  // Profile state
   const [lead, setLead] = useState<Lead | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // Editable fields
   const [notes, setNotes] = useState('')
   const [status, setStatus] = useState('')
   const [classification, setClassification] = useState('')
   const [assignedAgent, setAssignedAgent] = useState('')
+
+  // Save state
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
+  // Follow-up state
+  const [followUpState, setFollowUpState] = useState<'idle' | 'saving' | 'generating' | 'done' | 'error'>('idle')
+  const [followUpError, setFollowUpError] = useState<string | null>(null)
+  const [sequences, setSequences] = useState<SequenceStep[]>([])
+
+  // ── Load lead ──
   const fetchLead = useCallback(async () => {
     try {
       const res = await fetch(`/api/leads/${id}`)
@@ -61,10 +148,9 @@ export default function ClientProfilePage() {
     }
   }, [id])
 
-  useEffect(() => {
-    fetchLead()
-  }, [fetchLead])
+  useEffect(() => { fetchLead() }, [fetchLead])
 
+  // ── Save profile ──
   async function handleSave() {
     if (!lead) return
     setSaving(true)
@@ -86,6 +172,41 @@ export default function ClientProfilePage() {
     }
   }
 
+  // ── Follow-up ──
+  async function handleFollowUp() {
+    if (!lead) return
+    setFollowUpState('saving')
+    setFollowUpError(null)
+
+    try {
+      // 1. Auto-save any unsaved notes/fields first so Claude sees the latest data
+      setFollowUpState('saving')
+      await fetch(`/api/leads/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes, status, classification, assigned_agent: assignedAgent }),
+      })
+
+      // 2. Generate + save the sequence
+      setFollowUpState('generating')
+      const res = await fetch('/api/follow-up', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_id: id }),
+      })
+
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Generation failed')
+
+      setSequences(data.sequences ?? [])
+      setFollowUpState('done')
+    } catch (err) {
+      setFollowUpError(err instanceof Error ? err.message : 'Something went wrong')
+      setFollowUpState('error')
+    }
+  }
+
+  // ── Render states ──
   if (loading) {
     return (
       <div className="p-8 flex items-center justify-center min-h-64">
@@ -102,6 +223,8 @@ export default function ClientProfilePage() {
       </div>
     )
   }
+
+  const isGenerating = followUpState === 'saving' || followUpState === 'generating'
 
   return (
     <div className="p-8 max-w-4xl">
@@ -120,27 +243,71 @@ export default function ClientProfilePage() {
           <h1 className="text-2xl font-semibold text-white">
             {lead.first_name} {lead.last_name}
           </h1>
-          {lead.title && (
-            <p className="text-gray-400 text-sm mt-1">{lead.title}</p>
-          )}
+          {lead.title && <p className="text-gray-400 text-sm mt-1">{lead.title}</p>}
         </div>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
-            saved
-              ? 'bg-green-600/20 text-green-400 ring-1 ring-green-500/30'
-              : 'bg-blue-600 hover:bg-blue-700 text-white'
-          }`}
-        >
-          <Save size={14} />
-          {saving ? 'Saving…' : saved ? 'Saved!' : 'Save Changes'}
-        </button>
+
+        {/* Action buttons */}
+        <div className="flex items-center gap-2">
+          {/* Mark for Follow-Up */}
+          <button
+            onClick={handleFollowUp}
+            disabled={isGenerating || followUpState === 'done'}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+              followUpState === 'done'
+                ? 'bg-green-600/20 text-green-400 ring-1 ring-green-500/30 cursor-default'
+                : isGenerating
+                ? 'bg-purple-600/20 text-purple-400 ring-1 ring-purple-500/30 cursor-wait'
+                : followUpState === 'error'
+                ? 'bg-red-600/20 text-red-400 ring-1 ring-red-500/30 hover:bg-red-600/30'
+                : 'bg-purple-600 hover:bg-purple-700 text-white'
+            }`}
+          >
+            {isGenerating ? (
+              <>
+                <Loader2 size={14} className="animate-spin" />
+                {followUpState === 'saving' ? 'Saving…' : 'Generating…'}
+              </>
+            ) : followUpState === 'done' ? (
+              <>
+                <CheckCircle size={14} />
+                Sequence Created
+              </>
+            ) : (
+              <>
+                <Zap size={14} />
+                Mark for Follow-Up
+              </>
+            )}
+          </button>
+
+          {/* Save */}
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+              saved
+                ? 'bg-green-600/20 text-green-400 ring-1 ring-green-500/30'
+                : 'bg-blue-600 hover:bg-blue-700 text-white'
+            }`}
+          >
+            <Save size={14} />
+            {saving ? 'Saving…' : saved ? 'Saved!' : 'Save Changes'}
+          </button>
+        </div>
       </div>
 
+      {/* Follow-up error banner */}
+      {followUpState === 'error' && followUpError && (
+        <div className="mb-6 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 text-red-400 text-sm">
+          {followUpError}
+        </div>
+      )}
+
+      {/* Profile grid */}
       <div className="grid grid-cols-3 gap-6">
-        {/* Left: Info Card */}
+        {/* Left: Info + Pipeline */}
         <div className="col-span-1 space-y-5">
+          {/* Info card */}
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
             <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Info</h2>
             <div className="space-y-3">
@@ -169,18 +336,19 @@ export default function ClientProfilePage() {
                     <p className="text-xs text-gray-500">Score</p>
                     <p className={`text-sm font-semibold ${
                       lead.score >= 7 ? 'text-green-400' : lead.score >= 4 ? 'text-yellow-400' : 'text-red-400'
-                    }`}>{lead.score}/10</p>
+                    }`}>
+                      {lead.score}/10
+                    </p>
                   </div>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Editable Fields */}
+          {/* Pipeline card */}
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
             <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Pipeline</h2>
             <div className="space-y-4">
-              {/* Status */}
               <div>
                 <label className="block text-xs text-gray-500 mb-1.5">Status</label>
                 <select
@@ -200,7 +368,6 @@ export default function ClientProfilePage() {
                 )}
               </div>
 
-              {/* Assigned Agent */}
               <div>
                 <label className="block text-xs text-gray-500 mb-1.5">
                   <User size={11} className="inline mr-1" />Assigned Agent
@@ -214,7 +381,6 @@ export default function ClientProfilePage() {
                 />
               </div>
 
-              {/* Classification */}
               <div>
                 <label className="block text-xs text-gray-500 mb-1.5">
                   <Tag size={11} className="inline mr-1" />Classification
@@ -238,7 +404,7 @@ export default function ClientProfilePage() {
 
         {/* Right: Notes */}
         <div className="col-span-2">
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 h-full">
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
             <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Notes</h2>
             <textarea
               value={notes}
@@ -246,10 +412,36 @@ export default function ClientProfilePage() {
               placeholder="Add notes about this client — meetings, preferences, follow-ups…"
               className="w-full h-64 bg-gray-800/50 border border-gray-700 rounded-md px-4 py-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 resize-none leading-relaxed"
             />
-            <p className="text-xs text-gray-600 mt-2">Press &ldquo;Save Changes&rdquo; to persist</p>
+            <p className="text-xs text-gray-600 mt-2">
+              Notes are included in the AI follow-up prompt — the more detail, the better the sequence.
+            </p>
           </div>
         </div>
       </div>
+
+      {/* ── Follow-Up Sequence Preview ── */}
+      {sequences.length > 0 && (
+        <div className="mt-8">
+          <div className="flex items-center gap-2 mb-4">
+            <Zap size={15} className="text-purple-400" />
+            <h2 className="text-sm font-semibold text-white">Generated Follow-Up Sequence</h2>
+            <span className="text-xs text-gray-500 ml-1">
+              · {sequences.length} messages scheduled · pending send
+            </span>
+          </div>
+
+          <div className="space-y-2">
+            {sequences.map((seq) => (
+              <SequenceCard key={seq.id} seq={seq} />
+            ))}
+          </div>
+
+          <p className="text-xs text-gray-600 mt-3">
+            Messages are saved to Supabase with <code className="bg-gray-800 px-1 rounded text-gray-500">status = pending</code>.
+            Your n8n workflow will send them on the scheduled dates.
+          </p>
+        </div>
+      )}
     </div>
   )
 }

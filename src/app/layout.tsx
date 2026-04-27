@@ -31,8 +31,8 @@ export default function RootLayout({
       <body className="flex h-full bg-gray-950 text-gray-100">
         <Sidebar />
         <main className="flex-1 overflow-auto min-h-screen">
-          {children}
-        </main>
+            {children}
+          </main>
       </body>
     </html>
   );
