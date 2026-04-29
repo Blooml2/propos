@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local babel overrides — must never be deployed (disables SWC / breaks App Router)
+.babelrc
+.babelrc.*
+babel.config.*
+
+# duplicate next config (next.config.js is canonical)
+next.config.ts
