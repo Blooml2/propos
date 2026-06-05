@@ -5,10 +5,8 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   ArrowLeft, Save, MapPin, Building, User, Tag, Star,
-  Mail, MessageSquare, Clock, CheckCircle, Loader2, Zap,
+  Mail, MessageSquare, Clock, CheckCircle, Loader2, Zap, Bot,
 } from 'lucide-react'
-
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Lead {
   id: string
@@ -36,8 +34,6 @@ interface SequenceStep {
   scheduled_at: string
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
 const STATUS_OPTIONS = ['New', 'Contacted', 'Meeting', 'Negotiating', 'Closed']
 
 const STATUS_STYLES: Record<string, string> = {
@@ -48,15 +44,11 @@ const STATUS_STYLES: Record<string, string> = {
   Closed:       'bg-green-500/15 text-green-400 ring-1 ring-green-500/30',
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
 function SequenceCard({ seq }: { seq: SequenceStep }) {
   const [expanded, setExpanded] = useState(seq.step === 1)
-
   const scheduledDate = new Date(seq.scheduled_at).toLocaleDateString('en-US', {
     month: 'short', day: 'numeric', year: 'numeric',
   })
-
   const isEmail = seq.channel === 'email'
 
   return (
@@ -65,31 +57,21 @@ function SequenceCard({ seq }: { seq: SequenceStep }) {
         onClick={() => setExpanded((v) => !v)}
         className="w-full flex items-center gap-3 px-4 py-3 bg-gray-800/40 hover:bg-gray-800/70 transition-colors text-left"
       >
-        {/* Step badge */}
         <span className="w-6 h-6 rounded-full bg-blue-600/20 text-blue-400 text-xs font-bold flex items-center justify-center shrink-0">
           {seq.step}
         </span>
-
-        {/* Channel icon */}
         {isEmail
           ? <Mail size={13} className="text-blue-400 shrink-0" />
           : <MessageSquare size={13} className="text-green-400 shrink-0" />}
-
-        {/* Label */}
         <span className="text-sm text-white flex-1 truncate font-medium">
           {isEmail ? (seq.subject ?? 'Email') : `SMS — Day ${seq.step === 1 ? 0 : [2,5,10,21][seq.step - 2] ?? seq.step}`}
         </span>
-
-        {/* Date */}
         <span className="flex items-center gap-1 text-xs text-gray-500 shrink-0">
           <Clock size={11} />
           {scheduledDate}
         </span>
-
-        {/* Expand toggle */}
         <span className="text-gray-600 text-xs">{expanded ? '▲' : '▼'}</span>
       </button>
-
       {expanded && (
         <div className="px-4 py-3 bg-gray-900/40 border-t border-gray-800">
           {isEmail && seq.subject && (
@@ -104,33 +86,29 @@ function SequenceCard({ seq }: { seq: SequenceStep }) {
   )
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
-
 export default function ClientProfilePage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
 
-  // Profile state
   const [lead, setLead] = useState<Lead | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Editable fields
   const [notes, setNotes] = useState('')
   const [status, setStatus] = useState('')
   const [classification, setClassification] = useState('')
   const [assignedAgent, setAssignedAgent] = useState('')
 
-  // Save state
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
-  // Follow-up state
+  const [matchState, setMatchState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+  const [matchReason, setMatchReason] = useState<string | null>(null)
+
   const [followUpState, setFollowUpState] = useState<'idle' | 'saving' | 'generating' | 'done' | 'error'>('idle')
   const [followUpError, setFollowUpError] = useState<string | null>(null)
   const [sequences, setSequences] = useState<SequenceStep[]>([])
 
-  // ── Load lead ──
   const fetchLead = useCallback(async () => {
     try {
       const res = await fetch(`/api/leads/${id}`)
@@ -150,7 +128,6 @@ export default function ClientProfilePage() {
 
   useEffect(() => { fetchLead() }, [fetchLead])
 
-  // ── Save profile ──
   async function handleSave() {
     if (!lead) return
     setSaving(true)
@@ -172,22 +149,37 @@ export default function ClientProfilePage() {
     }
   }
 
-  // ── Follow-up ──
+  async function handleAutoAssign() {
+    if (!lead) return
+    setMatchState('loading')
+    try {
+      const res = await fetch('/api/match-agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_id: id }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Matching failed')
+      setAssignedAgent(data.agent)
+      setMatchReason(data.reason)
+      setMatchState('done')
+    } catch (err) {
+      setMatchState('error')
+    }
+  }
+
   async function handleFollowUp() {
     if (!lead) return
     setFollowUpState('saving')
     setFollowUpError(null)
 
     try {
-      // 1. Auto-save any unsaved notes/fields first so Claude sees the latest data
-      setFollowUpState('saving')
       await fetch(`/api/leads/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ notes, status, classification, assigned_agent: assignedAgent }),
       })
 
-      // 2. Generate + save the sequence
       setFollowUpState('generating')
       const res = await fetch('/api/follow-up', {
         method: 'POST',
@@ -206,7 +198,6 @@ export default function ClientProfilePage() {
     }
   }
 
-  // ── Render states ──
   if (loading) {
     return (
       <div className="p-8 flex items-center justify-center min-h-64">
@@ -228,7 +219,6 @@ export default function ClientProfilePage() {
 
   return (
     <div className="p-8 max-w-4xl">
-      {/* Back */}
       <button
         onClick={() => router.push('/clients')}
         className="flex items-center gap-1.5 text-gray-500 hover:text-white text-sm mb-6 transition-colors"
@@ -237,7 +227,6 @@ export default function ClientProfilePage() {
         Clients
       </button>
 
-      {/* Header */}
       <div className="flex items-start justify-between mb-8">
         <div>
           <h1 className="text-2xl font-semibold text-white">
@@ -246,9 +235,22 @@ export default function ClientProfilePage() {
           {lead.title && <p className="text-gray-400 text-sm mt-1">{lead.title}</p>}
         </div>
 
-        {/* Action buttons */}
         <div className="flex items-center gap-2">
-          {/* Mark for Follow-Up */}
+          <button
+            onClick={handleAutoAssign}
+            disabled={matchState === 'loading'}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+              matchState === 'done'
+                ? 'bg-green-600/20 text-green-400 ring-1 ring-green-500/30'
+                : matchState === 'loading'
+                ? 'bg-gray-600/20 text-gray-400 cursor-wait'
+                : 'bg-gray-700 hover:bg-gray-600 text-white'
+            }`}
+          >
+            <Bot size={14} />
+            {matchState === 'loading' ? 'Matching…' : matchState === 'done' ? 'Agent Assigned' : 'Auto-Assign Agent'}
+          </button>
+
           <button
             onClick={handleFollowUp}
             disabled={isGenerating || followUpState === 'done'}
@@ -263,24 +265,14 @@ export default function ClientProfilePage() {
             }`}
           >
             {isGenerating ? (
-              <>
-                <Loader2 size={14} className="animate-spin" />
-                {followUpState === 'saving' ? 'Saving…' : 'Generating…'}
-              </>
+              <><Loader2 size={14} className="animate-spin" />{followUpState === 'saving' ? 'Saving…' : 'Generating…'}</>
             ) : followUpState === 'done' ? (
-              <>
-                <CheckCircle size={14} />
-                Sequence Created
-              </>
+              <><CheckCircle size={14} />Sequence Created</>
             ) : (
-              <>
-                <Zap size={14} />
-                Mark for Follow-Up
-              </>
+              <><Zap size={14} />Mark for Follow-Up</>
             )}
           </button>
 
-          {/* Save */}
           <button
             onClick={handleSave}
             disabled={saving}
@@ -296,18 +288,20 @@ export default function ClientProfilePage() {
         </div>
       </div>
 
-      {/* Follow-up error banner */}
       {followUpState === 'error' && followUpError && (
         <div className="mb-6 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 text-red-400 text-sm">
           {followUpError}
         </div>
       )}
 
-      {/* Profile grid */}
+      {matchReason && matchState === 'done' && (
+        <div className="mb-6 bg-green-500/10 border border-green-500/20 rounded-lg px-4 py-3 text-green-400 text-sm">
+          Agent assigned: <strong>{assignedAgent}</strong> — {matchReason}
+        </div>
+      )}
+
       <div className="grid grid-cols-3 gap-6">
-        {/* Left: Info + Pipeline */}
         <div className="col-span-1 space-y-5">
-          {/* Info card */}
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
             <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Info</h2>
             <div className="space-y-3">
@@ -345,7 +339,6 @@ export default function ClientProfilePage() {
             </div>
           </div>
 
-          {/* Pipeline card */}
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
             <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Pipeline</h2>
             <div className="space-y-4">
@@ -367,7 +360,6 @@ export default function ClientProfilePage() {
                   </span>
                 )}
               </div>
-
               <div>
                 <label className="block text-xs text-gray-500 mb-1.5">
                   <User size={11} className="inline mr-1" />Assigned Agent
@@ -380,7 +372,6 @@ export default function ClientProfilePage() {
                   className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
                 />
               </div>
-
               <div>
                 <label className="block text-xs text-gray-500 mb-1.5">
                   <Tag size={11} className="inline mr-1" />Classification
@@ -402,7 +393,6 @@ export default function ClientProfilePage() {
           </div>
         </div>
 
-        {/* Right: Notes */}
         <div className="col-span-2">
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
             <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Notes</h2>
@@ -419,7 +409,6 @@ export default function ClientProfilePage() {
         </div>
       </div>
 
-      {/* ── Follow-Up Sequence Preview ── */}
       {sequences.length > 0 && (
         <div className="mt-8">
           <div className="flex items-center gap-2 mb-4">
@@ -429,13 +418,11 @@ export default function ClientProfilePage() {
               · {sequences.length} messages scheduled · pending send
             </span>
           </div>
-
           <div className="space-y-2">
             {sequences.map((seq) => (
               <SequenceCard key={seq.id} seq={seq} />
             ))}
           </div>
-
           <p className="text-xs text-gray-600 mt-3">
             Messages are saved to Supabase with <code className="bg-gray-800 px-1 rounded text-gray-500">status = pending</code>.
             Your n8n workflow will send them on the scheduled dates.
