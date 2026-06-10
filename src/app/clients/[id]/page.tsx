@@ -125,8 +125,26 @@ export default function ClientProfilePage() {
       setLoading(false)
     }
   }, [id])
-
-  useEffect(() => { fetchLead() }, [fetchLead])
+const checkAutoAssign = useCallback(async () => {
+  const res = await fetch('/api/settings')
+  const data = await res.json()
+  if (data.auto_assign === 'true') {
+    const res = await fetch('/api/match-agent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lead_id: id }),
+    })
+    const result = await res.json()
+    if (result.success) {
+      setAssignedAgent(result.agent)
+      setMatchReason(result.reason)
+      setMatchState('done')
+    }
+  }
+}, [id])
+  useEffect(() => {
+  fetchLead().then(() => checkAutoAssign())
+}, [fetchLead, checkAutoAssign])
 
   async function handleSave() {
     if (!lead) return
