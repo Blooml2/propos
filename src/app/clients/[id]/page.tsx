@@ -109,7 +109,7 @@ export default function ClientProfilePage() {
   const [followUpError, setFollowUpError] = useState<string | null>(null)
   const [sequences, setSequences] = useState<SequenceStep[]>([])
 
-  const fetchLead = useCallback(async () => {
+  const fetchLead = useCallback(async (): Promise<Lead | null> => {
     try {
       const res = await fetch(`/api/leads/${id}`)
       if (!res.ok) throw new Error('Lead not found')
@@ -119,32 +119,38 @@ export default function ClientProfilePage() {
       setStatus(data.status ?? '')
       setClassification(data.classification ?? '')
       setAssignedAgent(data.assigned_agent ?? '')
+      return data
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load')
+      return null
     } finally {
       setLoading(false)
     }
   }, [id])
-const checkAutoAssign = useCallback(async () => {
-  const res = await fetch('/api/settings')
-  const data = await res.json()
-  if (data.auto_assign === 'true') {
-    const res = await fetch('/api/match-agent', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lead_id: id }),
-    })
-    const result = await res.json()
-    if (result.success) {
-      setAssignedAgent(result.agent)
-      setMatchReason(result.reason)
-      setMatchState('done')
+
+  const checkAutoAssign = useCallback(async (currentLead: Lead | null) => {
+    if (!currentLead) return
+    if (currentLead.assigned_agent) return
+    const res = await fetch('/api/settings')
+    const data = await res.json()
+    if (data.auto_assign === 'true') {
+      const matchRes = await fetch('/api/match-agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_id: currentLead.id }),
+      })
+      const result = await matchRes.json()
+      if (result.success) {
+        setAssignedAgent(result.agent)
+        setMatchReason(result.reason)
+        setMatchState('done')
+      }
     }
-  }
-}, [id])
+  }, [])
+
   useEffect(() => {
-  fetchLead().then(() => checkAutoAssign())
-}, [fetchLead, checkAutoAssign])
+    fetchLead().then((data) => checkAutoAssign(data))
+  }, [fetchLead, checkAutoAssign])
 
   async function handleSave() {
     if (!lead) return
@@ -190,24 +196,20 @@ const checkAutoAssign = useCallback(async () => {
     if (!lead) return
     setFollowUpState('saving')
     setFollowUpError(null)
-
     try {
       await fetch(`/api/leads/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ notes, status, classification, assigned_agent: assignedAgent }),
       })
-
       setFollowUpState('generating')
       const res = await fetch('/api/follow-up', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lead_id: id }),
       })
-
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Generation failed')
-
       setSequences(data.sequences ?? [])
       setFollowUpState('done')
     } catch (err) {
@@ -254,20 +256,22 @@ const checkAutoAssign = useCallback(async () => {
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleAutoAssign}
-            disabled={matchState === 'loading'}
-            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
-              matchState === 'done'
-                ? 'bg-green-600/20 text-green-400 ring-1 ring-green-500/30'
-                : matchState === 'loading'
-                ? 'bg-gray-600/20 text-gray-400 cursor-wait'
-                : 'bg-gray-700 hover:bg-gray-600 text-white'
-            }`}
-          >
-            <Bot size={14} />
-            {matchState === 'loading' ? 'Matching…' : matchState === 'done' ? 'Agent Assigned' : 'Auto-Assign Agent'}
-          </button>
+          {!lead.assigned_agent && (
+            <button
+              onClick={handleAutoAssign}
+              disabled={matchState === 'loading'}
+              className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                matchState === 'done'
+                  ? 'bg-green-600/20 text-green-400 ring-1 ring-green-500/30'
+                  : matchState === 'loading'
+                  ? 'bg-gray-600/20 text-gray-400 cursor-wait'
+                  : 'bg-gray-700 hover:bg-gray-600 text-white'
+              }`}
+            >
+              <Bot size={14} />
+              {matchState === 'loading' ? 'Matching…' : matchState === 'done' ? 'Agent Assigned' : 'Auto-Assign Agent'}
+            </button>
+          )}
 
           <button
             onClick={handleFollowUp}
