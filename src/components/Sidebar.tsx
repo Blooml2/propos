@@ -2,13 +2,14 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, Users, Layers, User, Upload, Settings } from 'lucide-react'
+import { Home, Users, Layers, User, Upload, Calendar, Settings } from 'lucide-react'
 
 const nav = [
   { href: '/', label: 'Dashboard', icon: Home },
   { href: '/clients', label: 'Clients', icon: Users },
   { href: '/pipeline', label: 'Pipeline', icon: Layers },
   { href: '/agents', label: 'Agents', icon: User },
+  { href: '/bookings', label: 'Bookings', icon: Calendar },
   { href: '/import', label: 'Import', icon: Upload },
 ]
 
@@ -60,7 +61,7 @@ export default function Sidebar() {
           <Settings size={15} />
           Settings
         </Link>
-        <p className="text-gray-600 text-xs px-3 mt-2">Day 4 Build · v0.4</p>
+        <p className="text-gray-600 text-xs px-3 mt-2">Day 5 Build · v0.5</p>
       </div>
     </aside>
   )

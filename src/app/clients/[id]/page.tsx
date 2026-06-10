@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   ArrowLeft, Save, MapPin, Building, User, Tag, Star,
-  Mail, MessageSquare, Clock, CheckCircle, Loader2, Zap, Bot,
+  Mail, MessageSquare, Clock, CheckCircle, Loader2, Zap, Bot, Calendar, X,
 } from 'lucide-react'
 
 interface Lead {
@@ -109,6 +109,18 @@ export default function ClientProfilePage() {
   const [followUpError, setFollowUpError] = useState<string | null>(null)
   const [sequences, setSequences] = useState<SequenceStep[]>([])
 
+  // Booking modal
+  const [bookingOpen, setBookingOpen] = useState(false)
+  const [bookingDate, setBookingDate] = useState('')
+  const [bookingSlots, setBookingSlots] = useState<string[]>([])
+  const [bookingSlot, setBookingSlot] = useState('')
+  const [bookingType, setBookingType] = useState('consultation')
+  const [bookingAgentId, setBookingAgentId] = useState('')
+  const [bookingLoading, setBookingLoading] = useState(false)
+  const [bookingSuccess, setBookingSuccess] = useState<{ date: string; time: string } | null>(null)
+  const [slotsLoading, setSlotsLoading] = useState(false)
+  const [agents, setAgents] = useState<{ id: string; name: string }[]>([])
+
   const fetchLead = useCallback(async (): Promise<Lead | null> => {
     try {
       const res = await fetch(`/api/leads/${id}`)
@@ -152,6 +164,14 @@ export default function ClientProfilePage() {
     fetchLead().then((data) => checkAutoAssign(data))
   }, [fetchLead, checkAutoAssign])
 
+  useEffect(() => {
+    if (!bookingOpen) return
+    fetch('/api/agents')
+      .then((r) => r.json())
+      .then((data) => setAgents(Array.isArray(data) ? data : []))
+      .catch(() => {})
+  }, [bookingOpen])
+
   async function handleSave() {
     if (!lead) return
     setSaving(true)
@@ -187,7 +207,7 @@ export default function ClientProfilePage() {
       setAssignedAgent(data.agent)
       setMatchReason(data.reason)
       setMatchState('done')
-    } catch (err) {
+    } catch {
       setMatchState('error')
     }
   }
@@ -216,6 +236,57 @@ export default function ClientProfilePage() {
       setFollowUpError(err instanceof Error ? err.message : 'Something went wrong')
       setFollowUpState('error')
     }
+  }
+
+  async function fetchSlots(agentId: string, date: string) {
+    if (!agentId || !date) return
+    setSlotsLoading(true)
+    setBookingSlot('')
+    try {
+      const res = await fetch(`/api/bookings/availability?agent_id=${agentId}&date=${date}`)
+      const data = await res.json()
+      setBookingSlots(data.slots ?? [])
+    } finally {
+      setSlotsLoading(false)
+    }
+  }
+
+  async function handleDateChange(date: string) {
+    setBookingDate(date)
+    if (bookingAgentId) await fetchSlots(bookingAgentId, date)
+  }
+
+  async function handleBookingSubmit() {
+    if (!bookingAgentId || !bookingDate || !bookingSlot) return
+    setBookingLoading(true)
+    try {
+      const res = await fetch('/api/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lead_id: id,
+          agent_id: bookingAgentId,
+          date: bookingDate,
+          start_time: bookingSlot,
+          meeting_type: bookingType,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error ?? 'Booking failed')
+      }
+      setBookingSuccess({ date: bookingDate, time: bookingSlot })
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Booking failed')
+    } finally {
+      setBookingLoading(false)
+    }
+  }
+
+  function formatSlot(slot: string) {
+    const [h, m] = slot.split(':').map(Number)
+    const ampm = h >= 12 ? 'PM' : 'AM'
+    return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`
   }
 
   if (loading) {
@@ -256,6 +327,14 @@ export default function ClientProfilePage() {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => { setBookingOpen(true); setBookingSuccess(null) }}
+            className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-gray-700 hover:bg-gray-600 text-white transition-all"
+          >
+            <Calendar size={14} />
+            Book Meeting
+          </button>
+
           {!lead.assigned_agent && (
             <button
               onClick={handleAutoAssign}
@@ -449,6 +528,150 @@ export default function ClientProfilePage() {
             Messages are saved to Supabase with <code className="bg-gray-800 px-1 rounded text-gray-500">status = pending</code>.
             Your n8n workflow will send them on the scheduled dates.
           </p>
+        </div>
+      )}
+
+      {/* Book Meeting Modal */}
+      {bookingOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => { setBookingOpen(false); setBookingSuccess(null) }}
+          />
+          <div className="relative bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-2">
+                <Calendar size={16} className="text-blue-400" />
+                <h2 className="text-base font-semibold text-white">Book a Meeting</h2>
+              </div>
+              <button
+                onClick={() => { setBookingOpen(false); setBookingSuccess(null) }}
+                className="text-gray-500 hover:text-white transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {bookingSuccess ? (
+              <div className="text-center py-6">
+                <div className="w-12 h-12 rounded-full bg-green-500/20 flex items-center justify-center mx-auto mb-4">
+                  <CheckCircle size={24} className="text-green-400" />
+                </div>
+                <p className="text-white font-medium mb-1">Meeting Booked!</p>
+                <p className="text-gray-400 text-sm">
+                  {new Date(bookingSuccess.date + 'T12:00:00').toLocaleDateString('en-US', {
+                    weekday: 'long', month: 'long', day: 'numeric',
+                  })}
+                </p>
+                <p className="text-blue-400 text-sm font-medium mt-0.5">
+                  {(() => {
+                    const [h, m] = bookingSuccess.time.split(':').map(Number)
+                    return String(h % 12 || 12) + ':' + String(m).padStart(2, '0') + ' ' + (h >= 12 ? 'PM' : 'AM')
+                  })()}
+                </p>
+                <button
+                  onClick={() => { setBookingOpen(false); setBookingSuccess(null) }}
+                  className="mt-5 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-md transition-colors"
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1.5">Agent</label>
+                  <select
+                    value={bookingAgentId}
+                    onChange={async (e) => {
+                      setBookingAgentId(e.target.value)
+                      if (bookingDate) await fetchSlots(e.target.value, bookingDate)
+                    }}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                  >
+                    <option value="">— Select agent —</option>
+                    {agents.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1.5">Date</label>
+                  <input
+                    type="date"
+                    value={bookingDate}
+                    min={new Date().toISOString().slice(0, 10)}
+                    onChange={(e) => handleDateChange(e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1.5">
+                    Time Slot
+                    {slotsLoading && <Loader2 size={11} className="inline ml-1.5 animate-spin" />}
+                  </label>
+                  {bookingSlots.length === 0 && bookingDate && bookingAgentId && !slotsLoading ? (
+                    <p className="text-xs text-gray-500 py-2">No available slots for this date.</p>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-2 max-h-36 overflow-y-auto pr-1">
+                      {bookingSlots.map((slot) => (
+                        <button
+                          key={slot}
+                          onClick={() => setBookingSlot(slot)}
+                          className={`text-xs py-1.5 px-2 rounded-md border transition-colors ${
+                            bookingSlot === slot
+                              ? 'bg-blue-600 border-blue-500 text-white'
+                              : 'bg-gray-800 border-gray-700 text-gray-300 hover:border-blue-500/50 hover:text-white'
+                          }`}
+                        >
+                          {formatSlot(slot)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {(!bookingDate || !bookingAgentId) && (
+                    <p className="text-xs text-gray-600 mt-1">Select an agent and date to see available slots.</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1.5">Meeting Type</label>
+                  <select
+                    value={bookingType}
+                    onChange={(e) => setBookingType(e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                  >
+                    <option value="consultation">Consultation</option>
+                    <option value="showing">Property Showing</option>
+                    <option value="negotiation">Negotiation</option>
+                    <option value="closing">Closing</option>
+                    <option value="follow-up">Follow-Up</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-3 pt-1">
+                  <button
+                    onClick={handleBookingSubmit}
+                    disabled={bookingLoading || !bookingAgentId || !bookingDate || !bookingSlot}
+                    className="flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {bookingLoading ? (
+                      <><Loader2 size={14} className="animate-spin" />Booking…</>
+                    ) : (
+                      <><Calendar size={14} />Confirm Booking</>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setBookingOpen(false)}
+                    className="px-4 py-2 rounded-md text-sm text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
