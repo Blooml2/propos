@@ -10,6 +10,7 @@ interface Booking {
   end_time: string
   status: 'confirmed' | 'cancelled' | 'completed'
   meeting_type: string
+  lead_id: string
   lead: { first_name: string; last_name: string; company?: string } | null
   agent: { name: string } | null
 }
@@ -110,7 +111,7 @@ function BookingTable({ bookings, faded = false }: { bookings: Booking[]; faded?
           {bookings.map((b) => (
             <tr key={b.id} className="hover:bg-gray-800/40 transition-colors">
               <td className="px-4 py-3">
-                <Link href={`/clients/${b.id}`} className="text-white hover:text-blue-400 transition-colors font-medium">
+                <Link href={`/clients/${b.lead_id}`} className="text-white hover:text-blue-400 transition-colors font-medium">
                   {b.lead ? `${b.lead.first_name} ${b.lead.last_name}` : '—'}
                 </Link>
                 {b.lead?.company && (

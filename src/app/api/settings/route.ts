@@ -20,8 +20,10 @@ export async function PATCH(request: Request) {
   for (const [key, value] of Object.entries(body)) {
     await supabaseAdmin
       .from('settings')
-      .update({ value: String(value), updated_at: new Date().toISOString() })
-      .eq('key', key)
+      .upsert(
+        { key, value: String(value), updated_at: new Date().toISOString() },
+        { onConflict: 'key' }
+      )
   }
 
   return NextResponse.json({ success: true })
